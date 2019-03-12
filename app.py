@@ -1,11 +1,12 @@
 import click
 from flask import Flask
 from models import *
+from datastaging import import_data
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.ext.declarative import declarative_base
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = r'<Put db uri here>'
+app.config['SQLALCHEMY_DATABASE_URI'] = ''
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
@@ -30,3 +31,8 @@ def dropdb():
         raise
 
     click.echo('db tables successfully dropped')
+
+
+@app.cli.command()
+def importdata():
+    import_data(db)

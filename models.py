@@ -33,29 +33,29 @@ class Month(enum.Enum):
 
 
 class EnvironmentType(enum.Enum):
-    UNKNOWN = "00 - Unknown"
-    CLEAR = "01 - Clear"
-    RAIN = "02 - Rain"
-    SNOW = "03 - Snow"
-    FREEZING_RAIN = "04 - Freezing rain"
-    DRIFTING_SNOW = "05 - Drifter snow"
-    STRONG_WIND = "06 - Strong wind"
-    FOG_MIST_SMOKE_DUST = "07 - Fog, mist, smoke, dust"
+    UNKNOWN = "Unknown"
+    CLEAR = "Clear"
+    RAIN = "Rain"
+    SNOW = "Snow"
+    FREEZING_RAIN = "Freezing rain"
+    DRIFTING_SNOW = "Drifter snow"
+    STRONG_WIND = "Strong wind"
+    FOG_MIST_SMOKE_DUST = "Fog, mist, smoke, dust"
 
 
 class RoadSurfaceType(enum.Enum):
-    DRY = "01 - Dry"
-    WET = "02- Wet"
-    LOOSE_SNOW = "03 - Loose snow"
-    SLUSH = "04 - Slush"
-    PACKED_SNOW = "05 - Packed snow"
-    ICE = "06 - Ice"
+    DRY = "Dry"
+    WET = "Wet"
+    LOOSE_SNOW = "Loose snow"
+    SLUSH = "Slush"
+    PACKED_SNOW = "Packed snow"
+    ICE = "Ice"
 
 
 class TrafficControlType(enum.Enum):
-    TRAFFIC_SIGNAL = "01 - Traffic signal"
-    STOP_SIGN = "02 - Stop sign"
-    NO_CONTROL = "10 - No control"
+    TRAFFIC_SIGNAL = "Traffic signal"
+    STOP_SIGN = "Stop sign"
+    NO_CONTROL = "No control"
 
 
 # Hour Dimension
