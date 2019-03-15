@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, Date, Enum, Numeric, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, Date, Enum, Numeric, ForeignKey, Time
 from sqlalchemy.ext.declarative import declarative_base
 import enum
 
@@ -32,32 +32,6 @@ class Month(enum.Enum):
     DECEMBER = "December"
 
 
-class EnvironmentType(enum.Enum):
-    UNKNOWN = "Unknown"
-    CLEAR = "Clear"
-    RAIN = "Rain"
-    SNOW = "Snow"
-    FREEZING_RAIN = "Freezing rain"
-    DRIFTING_SNOW = "Drifter snow"
-    STRONG_WIND = "Strong wind"
-    FOG_MIST_SMOKE_DUST = "Fog, mist, smoke, dust"
-
-
-class RoadSurfaceType(enum.Enum):
-    DRY = "Dry"
-    WET = "Wet"
-    LOOSE_SNOW = "Loose snow"
-    SLUSH = "Slush"
-    PACKED_SNOW = "Packed snow"
-    ICE = "Ice"
-
-
-class TrafficControlType(enum.Enum):
-    TRAFFIC_SIGNAL = "Traffic signal"
-    STOP_SIGN = "Stop sign"
-    NO_CONTROL = "No control"
-
-
 # Hour Dimension
 
 class Hour(Base):
@@ -81,21 +55,23 @@ class Accident(Base):
     __tablename__ = "Accidents"
 
     key = Column(Integer, primary_key=True)
-    accident_datetime = Column(Date)
-    environemnt = Column(Enum(EnvironmentType))
-    road_surface = Column(Enum(RoadSurfaceType))
-    traffic_control = Column(Enum(TrafficControlType))
+    accident_time = Column(Time)
+    environment = Column(String)
+    road_surface = Column(String)
+    traffic_control = Column(String)
+    visibility = Column(String)
+    impact_type = Column(String)
 
 
 # Event Dimension
 
-class Event(Base):
-    __tablename__ = "Events"
+# class Event(Base):
+#     __tablename__ = "Events"
 
-    key = Column(Integer, primary_key=True)
-    event_name = Column(String)
-    event_start_date = Column(Date)
-    event_end_date = Column(Date)
+#     key = Column(Integer, primary_key=True)
+#     event_name = Column(String)
+#     event_start_date = Column(Date)
+#     event_end_date = Column(Date)
 
 
 # Location Dimension
@@ -127,6 +103,10 @@ class Weather(Base):
     wind_chill = Column(Numeric)
     wind_direction = Column(Integer)
     pressure = Column(Numeric)
+    relative_humidity = Column(Numeric)
+    humidex = Column(Numeric)
+    wind_chill = Column(Numeric)
+    hour_id = Column(Integer)
 
 
 # Accident Fact Table
@@ -140,6 +120,6 @@ class AccidentFact(Base):
     accident_key = Column(Integer, ForeignKey(
         'Accidents.key'), primary_key=True)
     weather_key = Column(Integer, ForeignKey('Weather.key'), primary_key=True)
-    event_key = Column(Integer, ForeignKey('Events.key'), primary_key=True)
+    # event_key = Column(Integer, ForeignKey('Events.key'), primary_key=True)
     is_fatal = Column(Boolean)
     is_intersection = Column(Boolean)
