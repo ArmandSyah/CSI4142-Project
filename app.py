@@ -4,13 +4,14 @@ import csv
 import os
 from timeit import default_timer as timer
 from flask import Flask
-from models import *
-from datastaging import import_data
+from models import Base
+from datastaging import import_data, import_weather, import_collision, setup_facttable
+from neighbourhood import setup_neighbourhood
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.ext.declarative import declarative_base
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = r''
+app.config['SQLALCHEMY_DATABASE_URI'] = r'postgresql://postgres:pokemoke12@localhost:5432/traffic accident db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
@@ -38,8 +39,14 @@ def dropdb():
 
 
 @app.cli.command()
+def setupneighbourhoodcsv():
+    setup_neighbourhood()
+
+
+@app.cli.command()
 def importdata():
     start = timer()
+    print("Starting data import")
     current_dir = os.getcwd()
     final_directory = os.path.join(current_dir, r'output')
     if not os.path.exists(final_directory):
@@ -50,22 +57,39 @@ def importdata():
 
 
 @app.cli.command()
-def xlsx2csv2017():
-    wb = xlrd.open_workbook(
-        'C:\\Users\Armand Syahtama\Downloads\h2017collisionsfinal.xlsx')
-    sh = wb.sheet_by_name('AllCollisions2017LatLong')
-    your_csv_file = open('C:\\projects\\2017collisionsfinal.xls.csv', 'w')
-    wr = csv.writer(your_csv_file, quoting=csv.QUOTE_ALL)
-
-    for rownum in range(sh.nrows):
-        wr.writerow(sh.row_values(rownum))
-
-    your_csv_file.close()
-
-
-@app.cli.command()
-def makenewfolder():
+def importweather():
+    start = timer()
+    print("Starting weather import")
     current_dir = os.getcwd()
     final_directory = os.path.join(current_dir, r'output')
     if not os.path.exists(final_directory):
         os.makedirs(final_directory)
+    import_weather(db)
+    end = timer()
+    print(f"{end - start} seconds")
+
+
+@app.cli.command
+def importcollision():
+    start = timer()
+    print("Starting collision import")
+    current_dir = os.getcwd()
+    final_directory = os.path.join(current_dir, r'output')
+    if not os.path.exists(final_directory):
+        os.makedirs(final_directory)
+    import_collision(db)
+    end = timer()
+    print(f"{end - start} seconds")
+
+
+@app.cli.command
+def setupfacttable():
+    start = timer()
+    print("Starting fact table set up")
+    current_dir = os.getcwd()
+    final_directory = os.path.join(current_dir, r'output')
+    if not os.path.exists(final_directory):
+        os.makedirs(final_directory)
+    setup_facttable(db)
+    end = timer()
+    print(f"{end - start} seconds")

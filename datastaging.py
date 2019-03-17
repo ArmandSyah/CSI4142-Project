@@ -35,6 +35,10 @@ ottawa_collision_files = [os.path.join(input_path, '2013collisionsfinal.xls.csv'
                           os.path.join(input_path, '2015collisionsfinal.xls.csv'), os.path.join(input_path, '2016collisionsfinal.xls.csv'), os.path.join(input_path, '2017collisionsfinal.xls.csv')]
 pattern_1 = re.compile(r'.* btwn .* & .*')
 pattern_2 = re.compile(r'.* @ .*')
+pattern_3 = re.compile(r'.*/.*/.*')
+
+pattern_4 = re.compile(r'.* @ .*/.*')
+pattern_5 = re.compile(r'.* btwn .*')
 
 
 def import_data(db):
@@ -48,6 +52,26 @@ def import_data(db):
     collision_set_cleaning(db)
     set_up_collisions_frames(db)
     insert_locations_accidents_table(db)
+    final_step_fact_table(db)
+
+
+def import_weather(db):
+    find_all_ottawa_weather_stations(db)
+    retrieve_priority_weather(db)
+    set_up_hour_table_csv(db)
+    set_up_hours_on_db(db)
+    clean_weather_data(db)
+    bulk_insert_weather_into_table(db)
+
+
+def import_collision(db):
+    concat_traffic_data(db)
+    collision_set_cleaning(db)
+    set_up_collisions_frames(db)
+    insert_locations_accidents_table(db)
+
+
+def setup_facttable(db):
     final_step_fact_table(db)
 
 
@@ -113,7 +137,7 @@ def set_up_hours_on_db(db):
     canada_holidays = holidays.Canada()
     hour_df = pd.read_csv(os.path.join(output_path, "hours_dim.csv"))
     print("Starting Hour Insert")
-    for index, row in hour_df.iterrows():
+    for _, row in hour_df.iterrows():
         hour, minute = row['time'].split(':')
 
         d = datetime(row['year'], row['month'], row['day'],
@@ -160,6 +184,8 @@ def clean_weather_data(db):
         batch_no += 1
 
     cleaned_weather_frame = pd.concat(li, axis=0, ignore_index=True)
+    cleaned_weather_frame.insert(
+        0, "key", range(0, len(cleaned_weather_frame)))
     cleaned_weather_frame.to_csv(os.path.join(
         output_path, "cleaned_priority_weather.csv"), sep=",")
     print("Finished Cleaning Weather data")
@@ -193,10 +219,11 @@ def bulk_insert_weather_into_table(db):
         os.path.join(output_path, "priority_weather_stations.csv"))
     weather_entries = []
     print("Beggining process of entering to weather dimension table")
-    for index, row in weather_data.iterrows():
+    for _, row in weather_data.iterrows():
         station_lat_long = stations_frame.loc[stations_frame['Name'] == row['station_name'], [
             "Latitude_(Decimal_Degrees)", "Longitude_(Decimal_Degrees)"]].iloc[0]
         weather_entry = {
+            'key': row['key'],
             'station_name': row['station_name'],
             'longitude': station_lat_long['Longitude_(Decimal_Degrees)'],
             'latitude': station_lat_long['Latitude_(Decimal_Degrees)'],
@@ -208,7 +235,7 @@ def bulk_insert_weather_into_table(db):
             'pressure': row['stn_press_kpa'] if not math.isnan(row['stn_press_kpa']) else None,
             'relative_humidity': row['rel_hum'] if not math.isnan(row['rel_hum']) else None,
             'humidex': row['humidex'] if not math.isnan(row['humidex']) else None,
-            'wind_chill': row['wind_chill'] if not math.isnan(row['wind_chill']) else None
+            'hour_id': row['hour_id'] if not math.isnan(row['hour_id']) else None
         }
         weather_entries.append(weather_entry)
     db.engine.execute(Weather.__table__.insert(), weather_entries)
@@ -271,48 +298,98 @@ def find_hour_id_collision(date, hour, db):
 def set_up_collisions_frames(db):
     df = pd.read_csv(os.path.join(
         output_path, "ottawa_collision_2013_2017.csv"))
+
+    print(f"Accidents {len(df)}")
+
+    neighbourhoods = pd.read_csv(os.path.join(input_path, "neighbourhood.csv"))
     location_frame = pd.DataFrame(
-        columns=["key", "street_name_highway", "intersection_1", "intersection_2", "longitude", "latitude", "neighbourhood"]),
+        columns=["key", "street_name_highway", "intersection_1", "intersection_2", "longitude", "latitude", "neighbourhood", "is_intersection", "original_location"])
     accident_frame = pd.DataFrame(columns=["key", "accident_time", "environment", "road_surface",
-                                           "traffic_control", "visibility", "impact_type", "is_fatal", "is_intersection", "hour_id", "loc_id"])
-    used_locations = set()
+                                           "traffic_control", "visibility", "impact_type", "is_fatal", "hour_id", "loc_id"])
     accident_key, location_key = 0, 0
+    used_location = []
+
     print("Beggining setting up dataframes for Location and Accident")
-    for index, row in df.iterrows():
+    for _, row in df.iterrows():
         # handle location
         location, latitude, longitude = row["LOCATION"], row["LATITUDE"], row["LONGITUDE"]
-        address = loc.raw["address"]
-
-        if location in used_locations:
-            location_from_frame = location_frame.loc(
-                location_frame["street_name_highway"] == row["LOCATION"]).iloc[0]
-            accident_frame.append({'key': accident_key, 'accident_time': row['TIME'], 'environment': row['ENVIRONMENT'], 'visibility': row[
-                                  'LIGHT'], 'impact_type': row['IMPACT_TYPE'], 'is_fatal': True if row['COLLISION_CLASSIFICATION'] == 'Fatal Injury' else False,
-                "is_intersection": True if re.match(pattern_1, location) else False, "hour_id": row["hour_id"], 'loc_id': location_from_frame["key"]}, ignore_index=True)
+        if location in used_location:
+            location_row = location_frame.loc[location_frame["original_location"]
+                                              == location]
+            location_row = location_row.iloc[0]
+            accident_frame = accident_frame.append({'key': accident_key, 'accident_time': row['TIME'], 'environment': row['ENVIRONMENT'], 'visibility': row[
+                'LIGHT'], 'impact_type': row['IMPACT_TYPE'], 'is_fatal': True if row['COLLISION_CLASSIFICATION'] == 'Fatal Injury' else False,
+                "is_intersection": location_row["is_intersection"], "hour_id": row["hour_id"], 'loc_id': location_row["key"]}, ignore_index=True)
             accident_key += 1
             continue
 
+        distances_between_neighbourhoods = []
+
+        for _, neighbour_row in neighbourhoods.iterrows():
+            distances_between_neighbourhoods.append((neighbour_row["name"],
+                                                     haversine((latitude, longitude), (neighbour_row["latitude"], neighbour_row["longitude"]))))
+
+        if len(distances_between_neighbourhoods) == 0:
+            continue
+
+        distances_between_neighbourhoods.sort(key=lambda tup: tup[1])
+        closest_neighbourhood = distances_between_neighbourhoods[0]
+
         if re.match(pattern_1, location):
-            loc = geolocator.reverse(f"{latitude}, {longitude}")
             location_parts = location.split("btwn")
             street_name, intersections = location_parts[0], location_parts[1].split(
                 "&")
-            location_dict = {"key": location_key, 'street_name_highway': street_name, 'intersection_1': intersections[0], 'intersection_2': intersections[
-                1], 'longitude': row["LONGITUDE"], 'latitude': row["LATITUDE"], 'neighbourhood': address['suburb'] if 'suburb' in address else address['city_district']}
-            accident_frame.append({'key': accident_key, 'accident_time': row['TIME'], 'environment': row['ENVIRONMENT'], 'visibility': row[
-                                  'LIGHT'], 'impact_type': row['IMPACT_TYPE'], 'is_fatal': True if row['COLLISION_CLASSIFICATION'] == 'Fatal Injury' else False,
-                "is_intersection": True, "hour_id": row["hour_id"], 'loc_id': location_key}, ignore_index=True)
+            location_dict = {"key": location_key, 'street_name_highway': street_name.strip(), 'intersection_1': intersections[0].strip(), 'intersection_2': intersections[
+                1].strip(), 'longitude': row["LONGITUDE"], 'latitude': row["LATITUDE"], 'neighbourhood': closest_neighbourhood[0], "is_intersection": True, 'original_location': location}
+            location_frame = location_frame.append(
+                location_dict, ignore_index=True)
+            accident_frame = accident_frame.append({'key': accident_key, 'accident_time': row['TIME'], 'environment': row['ENVIRONMENT'], 'visibility': row[
+                'LIGHT'], 'impact_type': row['IMPACT_TYPE'], 'is_fatal': True if row['COLLISION_CLASSIFICATION'] == 'Fatal Injury' else False,
+                "hour_id": row["hour_id"], 'loc_id': location_key}, ignore_index=True)
         elif re.match(pattern_2, location):
-            loc = geolocator.reverse(f"{latitude}, {longitude}")
             location_parts = location.split("@")
             street_name, intersection = location_parts[0], location_parts[1]
-            location_dict = {"key": location_key, 'street_name_highway': street_name, 'intersection_1': intersection, 'intersection_2': None,
-                             'longitude': row["LONGITUDE"], 'latitude': row["LATITUDE"], 'neighbourhood': address['suburb'] if 'suburb' in address else address['city_district']}
-            accident_frame.append({'key': accident_key, 'accident_time': row['TIME'], 'environment': row['ENVIRONMENT'], 'visibility': row[
-                                  'LIGHT'], 'impact_type': row['IMPACT_TYPE'], 'is_fatal': True if row['COLLISION_CLASSIFICATION'] == 'Fatal Injury' else False,
-                "is_intersection": False, "hour_id": row["hour_id"], 'loc_id': location_key}, ignore_index=True)
-        else:
-            continue
+            location_dict = {"key": location_key, 'street_name_highway': street_name.strip(), 'intersection_1': intersection.strip(), 'intersection_2': None,
+                             'longitude': row["LONGITUDE"], 'latitude': row["LATITUDE"], 'neighbourhood': closest_neighbourhood[0], "is_intersection": False,  'original_location': location}
+            location_frame = location_frame.append(
+                location_dict, ignore_index=True)
+            accident_frame = accident_frame.append({'key': accident_key, 'accident_time': row['TIME'], 'environment': row['ENVIRONMENT'], 'visibility': row[
+                'LIGHT'], 'impact_type': row['IMPACT_TYPE'], 'is_fatal': True if row['COLLISION_CLASSIFICATION'] == 'Fatal Injury' else False,
+                "hour_id": row["hour_id"], 'loc_id': location_key}, ignore_index=True)
+        elif re.match(pattern_3, location):
+            location_parts = location.split("/")
+            street_name, intersection_1, intersection_2 = location_parts[
+                0], location_parts[1], location_parts[2]
+            location_dict = {"key": location_key, 'street_name_highway': street_name.strip(), 'intersection_1': intersection_1.strip(), 'intersection_2': intersection_2.strip(),
+                             'longitude': row["LONGITUDE"], 'latitude': row["LATITUDE"], 'neighbourhood': closest_neighbourhood[0], "is_intersection": True, 'original_location': location}
+            location_frame = location_frame.append(
+                location_dict, ignore_index=True)
+            accident_frame = accident_frame.append({'key': accident_key, 'accident_time': row['TIME'], 'environment': row['ENVIRONMENT'], 'visibility': row[
+                'LIGHT'], 'impact_type': row['IMPACT_TYPE'], 'is_fatal': True if row['COLLISION_CLASSIFICATION'] == 'Fatal Injury' else False,
+                "hour_id": row["hour_id"], 'loc_id': location_key}, ignore_index=True)
+        elif re.match(pattern_4, location):
+            location_parts = location.split("@")
+            street_name, intersections = location_parts[0], location_parts[1].split(
+                "/")
+            location_dict = {"key": location_key, 'street_name_highway': street_name.strip(), 'intersection_1': intersections[0].strip(), 'intersection_2': intersections[
+                1].strip(), 'longitude': row["LONGITUDE"], 'latitude': row["LATITUDE"], 'neighbourhood': closest_neighbourhood[0], "is_intersection": True, 'original_location': location}
+            location_frame = location_frame.append(
+                location_dict, ignore_index=True)
+            accident_frame = accident_frame.append({'key': accident_key, 'accident_time': row['TIME'], 'environment': row['ENVIRONMENT'], 'visibility': row[
+                'LIGHT'], 'impact_type': row['IMPACT_TYPE'], 'is_fatal': True if row['COLLISION_CLASSIFICATION'] == 'Fatal Injury' else False,
+                "hour_id": row["hour_id"], 'loc_id': location_key}, ignore_index=True)
+        elif re.match(pattern_5, location):
+            location_parts = location.split("btwn")
+            street_name, intersection = location_parts[0], location_parts[1]
+            location_dict = {"key": location_key, 'street_name_highway': street_name.strip(), 'intersection_1': intersection.strip(), 'intersection_2': None,
+                             'longitude': row["LONGITUDE"], 'latitude': row["LATITUDE"], 'neighbourhood': closest_neighbourhood[0], "is_intersection": False, 'original_location': location}
+            location_frame = location_frame.append(
+                location_dict, ignore_index=True)
+            accident_frame = accident_frame.append({'key': accident_key, 'accident_time': row['TIME'], 'environment': row['ENVIRONMENT'], 'visibility': row[
+                'LIGHT'], 'impact_type': row['IMPACT_TYPE'], 'is_fatal': True if row['COLLISION_CLASSIFICATION'] == 'Fatal Injury' else False,
+                "hour_id": row["hour_id"], 'loc_id': location_key}, ignore_index=True)
+
+        used_location.append(location)
 
         accident_key += 1
         location_key += 1
@@ -334,7 +411,7 @@ def insert_locations_accidents_table(db):
     locations = []
     accidents = []
 
-    for index, row in location_frame.iterrows():
+    for _, row in location_frame.iterrows():
         location_entry = {
             "key": row["key"],
             "street_name_highway": row["street_name_highway"],
@@ -346,7 +423,7 @@ def insert_locations_accidents_table(db):
         }
         locations.append(location_entry)
 
-    for index, row in accident_frame.iterrows():
+    for _, row in accident_frame.iterrows():
         accident_entry = {
             "key": row["key"],
             "accident_time": row["accident_time"],
@@ -373,83 +450,28 @@ def final_step_fact_table(db):
     locations_frame = pd.read_csv(os.path.join(output_path, "locationdim.csv"))
 
     print("Beggining Fact Table insertion")
-    for index, row in accidents_frame.iterrows():
+    for _, row in accidents_frame.iterrows():
         key, hour_id, loc_id = row["key"], row["hour_id"], row["loc_id"]
-        weather_with_matching_hour = weather_frame.loc[weather_frame['hour_id'] == hour_id].iloc(
-            0)
-        location_row = locations_frame.loc[locations_frame['key'] == loc_id].iloc(
-            0)
+        weather_with_matching_hour = weather_frame.loc[weather_frame['hour_id']
+                                                       == hour_id]
+        location_row = locations_frame.loc[locations_frame['key']
+                                           == loc_id].iloc[0]
         location_latitude, location_longitude = location_row["latitude"], location_row["longitude"]
-        station_names = weather_with_matching_hour["station_name"].unique()
+        station_names = weather_with_matching_hour["station_name"]
         collected_distances = []
         for station_name in station_names:
-            station_row = stations_frame.loc(
-                stations_frame["Name"] == station_name).iloc(0)
+            station_row = stations_frame.loc[stations_frame["Name"]
+                                             == station_name].iloc[0]
             station_latitude, station_longitude = station_row[
                 "Latitude_(Decimal_Degrees)"], station_row["Longitude_(Decimal_Degrees)"]
             collected_distances.append((station_name, haversine(
                 (location_latitude, location_longitude), (station_latitude, station_longitude))))
         collected_distances.sort(key=lambda tup: tup[1])
         shortest_weather_station_distance = collected_distances[0]
-        matching_weather_hour_row = weather_frame.loc[weather_frame["hour_id"] ==
-                                                      hour_id and weather_frame["station_name"] == shortest_weather_station_distance[0]].iloc(0)
-        weather_row_in_db = db.session.query(Weather).filter(Weather.station_name == matching_weather_hour_row["station_name"],
-                                                             Weather.hour_id == matching_weather_hour_row["hour_id"]).first()
-        weather_key = weather_row_in_db.key
-        accident_facts.append({"hour_key": hour_id, "location_key": loc_id, "accident_key": key,
-                               "weather_key": weather_key, "is_fatal": row["is_fatal"], "is_intersection": row["is_intersection"]})
+        matching_weather_hour_row = weather_frame.loc[(weather_frame["hour_id"] ==
+                                                       hour_id) & (weather_frame["station_name"] == shortest_weather_station_distance[0])].iloc[0]
+        accident_facts.append({"hour_key": int(hour_id), "location_key": int(loc_id), "accident_key": int(key),
+                               "weather_key": int(matching_weather_hour_row["key"]), "is_fatal": row["is_fatal"], "is_intersection": location_row["is_intersection"]})
 
     db.engine.execute(AccidentFact.__table__.insert(), accident_facts)
     print("Finished Fact Table insertion")
-
-
-def hour_staging_first_attempt(db):
-    collision_set = pd.read_csv(
-        'C:\Projects\\2014collisionsfinal.xls.csv')
-
-    collision_set["adjusted_hour"] = 0
-    collision_set["hour_id"] = -1
-
-    canada_holidays = holidays.Canada()
-
-    adjust_hours_on_collision_set(collision_set)
-    print(collision_set.head(20))
-
-    used_dates = set()
-    hours = []
-    i = 0
-    for weather_set_chunk in pd.read_csv('C:\Projects\\ontario_1_1.csv', chunksize=chunksize, usecols=[
-            'Year', 'Month', 'Day', 'Time'], dtype={'Year': 'int32', 'Month': 'int8', 'Day': 'int8', 'Time': 'str'}):
-        for index, row in weather_set_chunk.iterrows():
-            print(f"Row {i}")
-            i += 1
-            hour, minute = row['Time'].split(':')
-
-            d = datetime(row['Year'], row['Month'], row['Day'],
-                         int(hour), int(minute))
-            if d in used_dates:
-                continue
-            else:
-                used_dates.add(d)
-                is_holiday = d in canada_holidays
-                hours.append(
-                    {'hour_start': d.hour,
-                        'hour_end': 0 if d.hour + 1 == 24 else d.hour + 1,
-                        'date': d.date(),
-                        'day_of_week': DayOfWeek(calendar.day_name[d.weekday()]),
-                        'month': Month(calendar.month_name[d.month]),
-                        'year': d.year,
-                        'weekend': d.weekday() >= 5,
-                        'holiday': is_holiday,
-                        'holiday_name': canada_holidays.get(d) if is_holiday else None})
-
-    db.engine.execute(Hour.__table__.insert(), hours)
-
-
-def adjust_hours_on_collision_set(collision_set):
-    for index, row in collision_set.iterrows():
-        t = row['TIME']
-        t = datetime.strptime(t, '%I:%M:%S %p')
-        # t = time.strptime(t[:-3], "%H:%M")
-        collision_set.at[index, 'adjusted_hour'] = (t.replace(second=0, microsecond=0, minute=0, hour=t.hour)
-                                                    + timedelta(hours=t.minute//30)).hour
