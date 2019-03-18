@@ -86,6 +86,7 @@ class Location(Base):
     longitude = Column(Numeric)
     latitude = Column(Numeric)
     neighbourhood = Column(String)
+    city = Column(String)
 
 
 # Weather Dimension
@@ -106,7 +107,7 @@ class Weather(Base):
     relative_humidity = Column(Numeric)
     humidex = Column(Numeric)
     wind_chill = Column(Numeric)
-    hour_id = Column(Integer)
+    weather = Column(String)
 
 
 # Accident Fact Table

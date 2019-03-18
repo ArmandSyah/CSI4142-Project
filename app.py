@@ -5,10 +5,11 @@ import os
 from timeit import default_timer as timer
 from flask import Flask
 from models import Base
-from datastaging import import_data, import_weather, import_collision, setup_facttable
+from datastaging import import_data, import_hours, import_weather, import_collision, setup_facttable
 from neighbourhood import setup_neighbourhood
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.ext.declarative import declarative_base
+import pandas as pd
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = r'postgresql://postgres:pokemoke12@localhost:5432/traffic accident db'
@@ -57,6 +58,14 @@ def importdata():
 
 
 @app.cli.command()
+def importhour():
+    start = timer()
+    import_hours(db)
+    end = timer()
+    print(f"{end - start} seconds")
+
+
+@app.cli.command()
 def importweather():
     start = timer()
     print("Starting weather import")
@@ -69,7 +78,7 @@ def importweather():
     print(f"{end - start} seconds")
 
 
-@app.cli.command
+@app.cli.command()
 def importcollision():
     start = timer()
     print("Starting collision import")
@@ -82,7 +91,7 @@ def importcollision():
     print(f"{end - start} seconds")
 
 
-@app.cli.command
+@app.cli.command()
 def setupfacttable():
     start = timer()
     print("Starting fact table set up")
@@ -93,3 +102,12 @@ def setupfacttable():
     setup_facttable(db)
     end = timer()
     print(f"{end - start} seconds")
+
+
+@app.cli.command()
+def count():
+    cleaned_prio_weather = pd.read_csv(
+        "C:\projects\\CSI4142-Project\\output\\priority_weather.csv")
+    cleaned_prio_weather = cleaned_prio_weather[cleaned_prio_weather["weather"].notnull(
+    )]
+    print(len(cleaned_prio_weather))
