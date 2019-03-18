@@ -58,8 +58,17 @@ def importdata():
 
 
 @app.cli.command()
+def setupoutput():
+    current_dir = os.getcwd()
+    final_directory = os.path.join(current_dir, r'output')
+    if not os.path.exists(final_directory):
+        os.makedirs(final_directory)
+
+
+@app.cli.command()
 def importhour():
     start = timer()
+    print("Starting Hours import")
     import_hours(db)
     end = timer()
     print(f"{end - start} seconds")
@@ -69,10 +78,6 @@ def importhour():
 def importweather():
     start = timer()
     print("Starting weather import")
-    current_dir = os.getcwd()
-    final_directory = os.path.join(current_dir, r'output')
-    if not os.path.exists(final_directory):
-        os.makedirs(final_directory)
     import_weather(db)
     end = timer()
     print(f"{end - start} seconds")
@@ -81,11 +86,7 @@ def importweather():
 @app.cli.command()
 def importcollision():
     start = timer()
-    print("Starting collision import")
-    current_dir = os.getcwd()
-    final_directory = os.path.join(current_dir, r'output')
-    if not os.path.exists(final_directory):
-        os.makedirs(final_directory)
+    print("Starting accident and location import")
     import_collision(db)
     end = timer()
     print(f"{end - start} seconds")
@@ -95,19 +96,6 @@ def importcollision():
 def setupfacttable():
     start = timer()
     print("Starting fact table set up")
-    current_dir = os.getcwd()
-    final_directory = os.path.join(current_dir, r'output')
-    if not os.path.exists(final_directory):
-        os.makedirs(final_directory)
     setup_facttable(db)
     end = timer()
     print(f"{end - start} seconds")
-
-
-@app.cli.command()
-def count():
-    cleaned_prio_weather = pd.read_csv(
-        "C:\projects\\CSI4142-Project\\output\\priority_weather.csv")
-    cleaned_prio_weather = cleaned_prio_weather[cleaned_prio_weather["weather"].notnull(
-    )]
-    print(len(cleaned_prio_weather))
