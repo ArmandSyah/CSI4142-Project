@@ -12,7 +12,7 @@ from sqlalchemy.ext.declarative import declarative_base
 import pandas as pd
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = r'postgresql://postgres:pokemoke12@localhost:5432/traffic accident db'
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ('SQLALCHEMY_DATABASE_URI')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
