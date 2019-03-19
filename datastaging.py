@@ -103,7 +103,7 @@ def find_all_ottawa_weather_stations(db):
                                     "distance_to_toronto"] = toronto_distance
 
     ontario_weather_stations = ontario_weather_stations[
-        (ontario_weather_stations.distance_to_ottawa <= 40) | (ontario_weather_stations.distance_to_toronto <= 40)]  # Get all stations within a 40 km radius of ottawa or toronto
+        (ontario_weather_stations.distance_to_ottawa <= 75) | (ontario_weather_stations.distance_to_toronto <= 75)]  # Get all stations within a 75 km radius of ottawa or toronto
     ontario_weather_stations.to_csv(
         os.path.join(output_path, "priority_weather_stations.csv"), sep=',', columns=["Name", "Province", "Latitude_(Decimal_Degrees)", "Longitude_(Decimal_Degrees)", "Elevation_(m)", "distance_to_ottawa", "distance_to_toronto"])
     print("Finished finding most important weather stations")
@@ -160,6 +160,7 @@ def set_up_hours_on_db(db):
                 'hour_end': 0 if d.hour + 1 == 24 else d.hour + 1,
                 'date': d.date(),
                 'day_of_week': DayOfWeek(calendar.day_name[d.weekday()]),
+                'day': d.day,
                 'month': Month(calendar.month_name[d.month]),
                 'year': d.year,
                 'weekend': d.weekday() >= 5,

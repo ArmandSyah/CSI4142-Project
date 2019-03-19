@@ -42,6 +42,7 @@ class Hour(Base):
     hour_end = Column(Integer)
     date = Column(Date)
     day_of_week = Column(Enum(DayOfWeek))
+    day = Column(Integer)
     month = Column(Enum(Month))
     year = Column(Integer)
     weekend = Column(Boolean)
