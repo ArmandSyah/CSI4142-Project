@@ -41,6 +41,13 @@ pattern_4 = re.compile(r'.* @ .*/.*')
 pattern_5 = re.compile(r'.* btwn .*')
 
 
+def chunk(l, n):
+    # For item i in a range that is a length of l,
+    for i in range(0, len(l), n):
+        # Create an index range for l of n items:
+        yield l[i:i+n]
+
+
 def import_data(db):
     find_all_ottawa_weather_stations(db)
     retrieve_priority_weather(db)
@@ -125,8 +132,8 @@ def retrieve_priority_weather(db):
             important_chunk = weather_set_chunk[
                 weather_set_chunk.station_name.isin(station_names)]
             important_chunk = important_chunk.loc[(important_chunk["temp_celcius"].notnull())
-                                                  & (important_chunk["dew_point_temp_celcius"].notnull()) & (important_chunk["rel_hum"].notnull()), ["date_time", "year", "month", "day", "time", "temp_celcius", "dew_point_temp_celcius", "rel_hum", "wind_dir_10s_deg",
-                                                                                                                                                     "wind_spd_km_h", "visibility_km", "stn_press_kpa", "humidex", "wind_chill", "weather", "station_name", "province"]]
+                                                  & (important_chunk["dew_point_temp_celcius"].notnull()) & (important_chunk["rel_hum"].notnull() & (important_chunk["weather"].notnull())), ["date_time", "year", "month", "day", "time", "temp_celcius", "dew_point_temp_celcius", "rel_hum", "wind_dir_10s_deg",
+                                                                                                                                                                                              "wind_spd_km_h", "visibility_km", "stn_press_kpa", "humidex", "wind_chill", "weather", "station_name", "province"]]
             if (len(important_chunk) > 0):
                 li.append(important_chunk)
 
@@ -156,7 +163,8 @@ def set_up_hours_on_db(db):
                      int(hour), int(minute))
         is_holiday = d in canada_holidays
         hours.append(
-            {'hour_start': d.hour,
+            {'key': row["key"],
+                'hour_start': d.hour,
                 'hour_end': 0 if d.hour + 1 == 24 else d.hour + 1,
                 'date': d.date(),
                 'day_of_week': DayOfWeek(calendar.day_name[d.weekday()]),
@@ -167,11 +175,16 @@ def set_up_hours_on_db(db):
                 'holiday': is_holiday,
                 'holiday_name': canada_holidays.get(d) if is_holiday else None})
 
-    db.engine.execute(Hour.__table__.insert(), hours)
+    print(f"# of hour dimensional entries {len(hours)}")
+    hour_chunks = list(chunk(hours, 5000))
+    for index, hour_chunk in enumerate(hour_chunks):
+        print(f"Inserting Hour chunk #{index}")
+        db.engine.execute(Hour.__table__.insert(), hour_chunk)
     print("Finished inserting hours")
 
 
 def clean_weather_data(db):
+    hour_dim = pd.read_csv(os.path.join(output_path, "hours_dim.csv"))
     li = []
     batch_no = 1
     print("Cleaning Weather data")
@@ -183,7 +196,7 @@ def clean_weather_data(db):
         batch = batch.loc[batch["valid"], ["date_time", "year", "month", "day", "time", "temp_celcius", "dew_point_temp_celcius", "rel_hum", "wind_dir_10s_deg",
                                                                                         "wind_spd_km_h", "visibility_km", "stn_press_kpa", "humidex", "wind_chill", "weather", "station_name", "province"]]
         batch["hour_id"] = batch.apply(lambda row: find_hour_id_weather(
-            row["year"], row["month"], row["day"], row["time"].split(":")[0], db), axis=1)
+            row["year"], row["month"], row["day"], row["time"], hour_dim), axis=1)
         batch = batch.loc[batch["hour_id"] != -1, ["date_time", "year", "month", "day", "time", "temp_celcius", "dew_point_temp_celcius", "rel_hum", "wind_dir_10s_deg",
                                                    "wind_spd_km_h", "visibility_km", "stn_press_kpa", "humidex", "wind_chill", "weather", "station_name", "province", "hour_id"]]
         if (len(batch) > 0):
@@ -214,12 +227,12 @@ def check_valid(temp, month, humidity, wind_spd, dew_point_temp, wind_dir, visib
     return valid_temp and valid_humidity and valid_wind_spd and valid_dew_point_temp and valid_wind_dir and valid_visibility
 
 
-def find_hour_id_weather(year, month, day, hour, db):
-    d = datetime(year, month, day,
-                 int(hour))
-    hour_obj = db.session.query(Hour).filter(Hour.hour_start == d.hour, Hour.month == Month(
-        calendar.month_name[month]), Hour.year == year, Hour.date == d.date()).first()
-    return hour_obj.key if hour_obj != None else -1
+def find_hour_id_weather(year, month, day, hour, hour_dim):
+    hour_obj = hour_dim[(hour_dim["Year"] == year) & (hour_dim["Month"] == month) & (
+        hour_dim["Day"] == day) & (hour_dim["Time"] == hour)]
+    if hour_obj.empty:
+        return -1
+    return hour_obj.iloc[0]["key"]
 
 
 def bulk_insert_weather_into_table(db):
@@ -248,7 +261,12 @@ def bulk_insert_weather_into_table(db):
             'weather': row['weather'] if row["weather"] == row["weather"] else None
         }
         weather_entries.append(weather_entry)
-    db.engine.execute(Weather.__table__.insert(), weather_entries)
+
+    print(f"# of weather dimensional entries {len(weather_entries)}")
+    weather_chunks = list(chunk(weather_entries, 5000))
+    for index, weather_chunk in enumerate(weather_chunks):
+        print(f"Inserting Weather chunk #{index}")
+        db.engine.execute(Weather.__table__.insert(), weather_chunk)
     print("Finished processing data into weather dimension")
 
 
@@ -270,13 +288,16 @@ def concat_traffic_data(db):
 
 
 def collision_set_cleaning(db):
+    hour_dim = pd.read_csv(os.path.join(output_path, "hours_dim.csv"))
     print("Beggining cleaning of collision data")
     toronto_collision_set = pd.read_csv(os.path.join(input_path, "toronto_collisions.csv"), usecols=[
                                         "DATE", "TIME", "Hour", "STREET1", "STREET2", "LATITUDE", "LONGITUDE", "LOCCOORD", "TRAFFCTL", "VISIBILITY", "LIGHT", "RDSFCOND", "IMPACTYPE", "ACCLASS", "Hood_Name"])
     toronto_collision_set["Hood_Name"] = toronto_collision_set.apply(
         lambda row: re.sub(r'\([0-9]+\)', '', row["Hood_Name"]), axis=1)
     toronto_collision_set["hour_id"] = toronto_collision_set.apply(
-        lambda row: find_hour_id_collision_toronto(row["DATE"], row["Hour"], db), axis=1)
+        lambda row: find_hour_id_collision_toronto(row["DATE"], row["Hour"], hour_dim), axis=1)
+    toronto_collision_set = toronto_collision_set.loc[toronto_collision_set["hour_id"] != -1, [
+        "DATE", "TIME", "Hour", "STREET1", "STREET2", "LATITUDE", "LONGITUDE", "LOCCOORD", "TRAFFCTL", "VISIBILITY", "LIGHT", "RDSFCOND", "IMPACTYPE", "ACCLASS", "Hood_Name", "hour_id"]]
     toronto_collision_set.to_csv(os.path.join(
         output_path, "cleaned_toronto_collisions.csv"), sep=",")
 
@@ -292,7 +313,7 @@ def collision_set_cleaning(db):
                                                            + timedelta(hours=t.minute//30)).hour
 
     ottawa_collision_set["hour_id"] = ottawa_collision_set.apply(
-        lambda row: find_hour_id_collision_ottawa(row['DATE'], row['adjusted_hour'], db), axis=1)
+        lambda row: find_hour_id_collision_ottawa(row['DATE'], row['adjusted_hour'], hour_dim), axis=1)
     ottawa_collision_set = ottawa_collision_set.loc[ottawa_collision_set["hour_id"] != -1, ['LOCATION', 'LONGITUDE', 'LATITUDE', 'DATE', 'TIME', 'ENVIRONMENT',
                                                                                             'LIGHT', 'SURFACE_CONDITION', 'TRAFFIC_CONTROL', 'COLLISION_CLASSIFICATION', 'IMPACT_TYPE', 'adjusted_hour', 'hour_id']]
 
@@ -308,18 +329,22 @@ def collision_set_cleaning(db):
     print("Finished cleaning traffic data")
 
 
-def find_hour_id_collision_ottawa(date, hour, db):
+def find_hour_id_collision_ottawa(date, hour, hour_dim):
     d = datetime.strptime(date, '%Y-%m-%d')
-    hour_obj = db.session.query(Hour).filter(Hour.hour_start == hour, Hour.month == Month(
-        calendar.month_name[d.month]), Hour.year == d.year, Hour.date == d.date()).first()
-    return hour_obj.key if hour_obj != None else -1
+    hour_obj = hour_dim.loc[(hour_dim["Time"] == f"{str(hour).zfill(2)}:00") & (hour_dim["Month"] == d.month) & (
+        hour_dim["Day"] == d.day) & (hour_dim["Year"] == d.year)]
+    if hour_obj.empty:
+        return -1
+    return hour_obj.iloc[0]["key"]
 
 
-def find_hour_id_collision_toronto(date, hour, db):
+def find_hour_id_collision_toronto(date, hour, hour_dim):
     d = dateutil.parser.parse(date)
-    hour_obj = db.session.query(Hour).filter(Hour.hour_start == hour, Hour.month == Month(
-        calendar.month_name[d.month]), Hour.year == d.year, Hour.date == d.date()).first()
-    return hour_obj.key if hour_obj != None else -1
+    hour_obj = hour_dim.loc[(hour_dim["Time"] == f"{str(hour).zfill(2)}:00") & (hour_dim["Month"] == d.month) & (
+        hour_dim["Day"] == d.day) & (hour_dim["Year"] == d.year)]
+    if hour_obj.empty:
+        return -1
+    return hour_obj.iloc[0]["key"]
 
 
 def fill_time(time):
@@ -383,7 +408,7 @@ def set_up_collisions_frames(db):
                                               == location]
             location_row = location_row.iloc[0]
             accident_frame = accident_frame.append({'key': accident_key, 'accident_time': row['TIME'], 'environment': row['ENVIRONMENT'],  'road_surface': row["SURFACE_CONDITION"], 'traffic_control': row["TRAFFIC_CONTROL"], 'visibility': row[
-                'LIGHT'], 'impact_type': row['IMPACT_TYPE'], 'is_fatal': True if row['COLLISION_CLASSIFICATION'] == 'Fatal Injury' else False,
+                'LIGHT'], 'impact_type': row['IMPACT_TYPE'], 'is_fatal': True if row['COLLISION_CLASSIFICATION'] == 'Fatal injury' else False,
                 "hour_id": row["hour_id"], 'loc_id': location_row["key"]}, ignore_index=True)
             accident_key += 1
             continue
@@ -409,7 +434,7 @@ def set_up_collisions_frames(db):
             location_frame = location_frame.append(
                 location_dict, ignore_index=True)
             accident_frame = accident_frame.append({'key': accident_key, 'accident_time': row['TIME'], 'environment': row['ENVIRONMENT'], 'road_surface': row["SURFACE_CONDITION"], 'traffic_control': row["TRAFFIC_CONTROL"], 'visibility': row[
-                'LIGHT'], 'impact_type': row['IMPACT_TYPE'], 'is_fatal': True if row['COLLISION_CLASSIFICATION'] == 'Fatal Injury' else False,
+                'LIGHT'], 'impact_type': row['IMPACT_TYPE'], 'is_fatal': True if row['COLLISION_CLASSIFICATION'] == 'Fatal injury' else False,
                 "hour_id": row["hour_id"], 'loc_id': location_key}, ignore_index=True)
         elif re.match(pattern_2, location):
             location_parts = location.split("@")
@@ -419,7 +444,7 @@ def set_up_collisions_frames(db):
             location_frame = location_frame.append(
                 location_dict, ignore_index=True)
             accident_frame = accident_frame.append({'key': accident_key, 'accident_time': row['TIME'], 'environment': row['ENVIRONMENT'], 'road_surface': row["SURFACE_CONDITION"], 'traffic_control': row["TRAFFIC_CONTROL"], 'visibility': row[
-                'LIGHT'], 'impact_type': row['IMPACT_TYPE'], 'is_fatal': True if row['COLLISION_CLASSIFICATION'] == 'Fatal Injury' else False,
+                'LIGHT'], 'impact_type': row['IMPACT_TYPE'], 'is_fatal': True if row['COLLISION_CLASSIFICATION'] == 'Fatal injury' else False,
                 "hour_id": row["hour_id"], 'loc_id': location_key}, ignore_index=True)
         elif re.match(pattern_3, location):
             location_parts = location.split("/")
@@ -430,7 +455,7 @@ def set_up_collisions_frames(db):
             location_frame = location_frame.append(
                 location_dict, ignore_index=True)
             accident_frame = accident_frame.append({'key': accident_key, 'accident_time': row['TIME'], 'environment': row['ENVIRONMENT'], 'road_surface': row["SURFACE_CONDITION"], 'traffic_control': row["TRAFFIC_CONTROL"], 'visibility': row[
-                'LIGHT'], 'impact_type': row['IMPACT_TYPE'], 'is_fatal': True if row['COLLISION_CLASSIFICATION'] == 'Fatal Injury' else False,
+                'LIGHT'], 'impact_type': row['IMPACT_TYPE'], 'is_fatal': True if row['COLLISION_CLASSIFICATION'] == 'Fatal injury' else False,
                 "hour_id": row["hour_id"], 'loc_id': location_key}, ignore_index=True)
         elif re.match(pattern_4, location):
             location_parts = location.split("@")
@@ -441,7 +466,7 @@ def set_up_collisions_frames(db):
             location_frame = location_frame.append(
                 location_dict, ignore_index=True)
             accident_frame = accident_frame.append({'key': accident_key, 'accident_time': row['TIME'], 'environment': row['ENVIRONMENT'], 'road_surface': row["SURFACE_CONDITION"], 'traffic_control': row["TRAFFIC_CONTROL"], 'visibility': row[
-                'LIGHT'], 'impact_type': row['IMPACT_TYPE'], 'is_fatal': True if row['COLLISION_CLASSIFICATION'] == 'Fatal Injury' else False,
+                'LIGHT'], 'impact_type': row['IMPACT_TYPE'], 'is_fatal': True if row['COLLISION_CLASSIFICATION'] == 'Fatal injury' else False,
                 "hour_id": row["hour_id"], 'loc_id': location_key}, ignore_index=True)
         elif re.match(pattern_5, location):
             location_parts = location.split("btwn")
@@ -451,7 +476,7 @@ def set_up_collisions_frames(db):
             location_frame = location_frame.append(
                 location_dict, ignore_index=True)
             accident_frame = accident_frame.append({'key': accident_key, 'accident_time': row['TIME'], 'environment': row['ENVIRONMENT'], 'road_surface': row["SURFACE_CONDITION"], 'traffic_control': row["TRAFFIC_CONTROL"], 'visibility': row[
-                'LIGHT'], 'impact_type': row['IMPACT_TYPE'], 'is_fatal': True if row['COLLISION_CLASSIFICATION'] == 'Fatal Injury' else False,
+                'LIGHT'], 'impact_type': row['IMPACT_TYPE'], 'is_fatal': True if row['COLLISION_CLASSIFICATION'] == 'Fatal injury' else False,
                 "hour_id": row["hour_id"], 'loc_id': location_key}, ignore_index=True)
 
         used_location_ottawa.append(location)
@@ -475,7 +500,6 @@ def insert_locations_accidents_table(db):
 
     locations = []
     accidents = []
-
     for _, row in location_frame.iterrows():
         location_entry = {
             "key": row["key"],
@@ -501,8 +525,18 @@ def insert_locations_accidents_table(db):
         }
         accidents.append(accident_entry)
 
-    db.engine.execute(Location.__table__.insert(), locations)
-    db.engine.execute(Accident.__table__.insert(), accidents)
+    print(f"# of location dimensional entries {len(locations)}")
+    location_chunks = list(chunk(locations, 5000))
+    for index, location_chunk in enumerate(location_chunks):
+        print(f"Inserting Location chunk #{index}")
+        db.engine.execute(Location.__table__.insert(), location_chunk)
+
+    print(f"# of accident dimensional entries {len(accidents)}")
+    accident_chunks = list(chunk(accidents, 5000))
+    for index, accident_chunk in enumerate(accident_chunks):
+        print(f"Inserting Accident chunk #{index}")
+        db.engine.execute(Accident.__table__.insert(), accident_chunk)
+
     print("Finished inserting into location and accident dimension tables")
 
 
@@ -524,6 +558,11 @@ def final_step_fact_table(db):
                                            == loc_id].iloc[0]
         location_latitude, location_longitude = location_row["latitude"], location_row["longitude"]
         station_names = weather_with_matching_hour["station_name"]
+
+        # in the odd chance that there is no corresponding weather rows, continue to next row
+        if len(station_names) == 0:
+            continue
+
         collected_distances = []
         for station_name in station_names:
             station_row = stations_frame.loc[stations_frame["Name"]
@@ -535,9 +574,16 @@ def final_step_fact_table(db):
         collected_distances.sort(key=lambda tup: tup[1])
         shortest_weather_station_distance = collected_distances[0]
         matching_weather_hour_row = weather_frame.loc[(weather_frame["hour_id"] ==
-                                                       hour_id) & (weather_frame["station_name"] == shortest_weather_station_distance[0])].iloc[0]
+                                                       hour_id) & (weather_frame["station_name"] == shortest_weather_station_distance[0])]
+        if matching_weather_hour_row.empty:
+            continue
+        matching_weather_hour_row = matching_weather_hour_row.iloc[0]
         accident_facts.append({"hour_key": int(hour_id), "location_key": int(loc_id), "accident_key": int(key),
                                "weather_key": int(matching_weather_hour_row["key"]), "is_fatal": row["is_fatal"], "is_intersection": location_row["is_intersection"]})
 
+    print(f"# of Accident fact entries {len(accident_facts)}")
+    accident_facts_dataframe = pd.DataFrame(accident_facts)
+    accident_facts_dataframe.to_csv(
+        os.path.join(output_path, "accident_facts.csv"))
     db.engine.execute(AccidentFact.__table__.insert(), accident_facts)
     print("Finished Fact Table insertion")
