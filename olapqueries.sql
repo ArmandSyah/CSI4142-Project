@@ -4,7 +4,7 @@
 SELECT l.street_name_highway, COUNT(accident_key) AS TotalAccidentNumber
 FROM "Accident Facts" af
     INNER JOIN "Accidents" a ON a.key = af.accident_key
-    INNER JOIN "Locations" ; on l.key = af.location_key
+    INNER JOIN "Locations" l on l.key = af.location_key
 GROUP BY l.street_name_highway
 ORDER BY TotalAccidentNumber desc
 
@@ -34,7 +34,7 @@ SELECT h.year, COUNT(accident_key) AS TotalAccidentNumber
 	 ON h.key= af.hour_key
 	INNER JOIN "Locations" l
 	 ON l.key= af.location_key
-WHERE l.city = 'ottawa'
+WHERE l.city = 'Ottawa'
  GROUP BY h.year;
  
 SELECT h.month, COUNT(accident_key) AS TotalAccidentNumber
@@ -45,7 +45,7 @@ SELECT h.month, COUNT(accident_key) AS TotalAccidentNumber
 	 ON h.key= af.hour_key
 	INNER JOIN "Locations" l
 	 ON l.key= af.location_key
-WHERE l.city = 'ottawa'
+WHERE l.city = 'Ottawa'
  GROUP BY h.month;
  
 SELECT h.day, COUNT(accident_key) AS TotalAccidentNumber
@@ -56,7 +56,7 @@ SELECT h.day, COUNT(accident_key) AS TotalAccidentNumber
 	 ON h.key= af.hour_key
 	INNER JOIN "Locations" l
 	 ON l.key= af.location_key
-WHERE l.city = 'ottawa'
+WHERE l.city = 'Ottawa'
  GROUP BY h.day;
  
 SELECT h.hour_start, COUNT(accident_key) AS TotalAccidentNumber
@@ -67,7 +67,7 @@ SELECT h.hour_start, COUNT(accident_key) AS TotalAccidentNumber
 	 ON h.key= af.hour_key
 	INNER JOIN "Locations" l
 	 ON l.key= af.location_key
-WHERE l.city = 'ottawa'
+WHERE l.city = 'Ottawa'
  GROUP BY h.hour_start;
 
  /*
@@ -76,7 +76,7 @@ WHERE l.city = 'ottawa'
 
  /* Slice: Explore the number of accidents in Orleans over the years*/
 
- Select h.year, COUNT(accident_key) AS TotalAccidentNumber
+ Select h.year, COUNT(accident_key) AS AccidentsInOrleans
  FROM "Accident Facts" af
 	INNER JOIN "Accidents" a
 	 ON af.accident_key= a.key
@@ -116,7 +116,7 @@ Select h.day_of_week, h.hour_start, l.neighbourhood, COUNT (accident_key)
  Group by h.day_of_week, h.hour_start, l.neighbourhood;
 
  /*
-    Dice
+    4. Dice
  */
 
  /* Dice: Get the number of accidents in Ottawa, in the year 2014, when the weather was clear and road environment was Clear*/

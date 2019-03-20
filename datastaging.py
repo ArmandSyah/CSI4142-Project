@@ -41,13 +41,6 @@ pattern_4 = re.compile(r'.* @ .*/.*')
 pattern_5 = re.compile(r'.* btwn .*')
 
 
-def chunk(l, n):
-    # For item i in a range that is a length of l,
-    for i in range(0, len(l), n):
-        # Create an index range for l of n items:
-        yield l[i:i+n]
-
-
 def import_data(db):
     find_all_ottawa_weather_stations(db)
     retrieve_priority_weather(db)
@@ -176,10 +169,7 @@ def set_up_hours_on_db(db):
                 'holiday_name': canada_holidays.get(d) if is_holiday else None})
 
     print(f"# of hour dimensional entries {len(hours)}")
-    hour_chunks = list(chunk(hours, 5000))
-    for index, hour_chunk in enumerate(hour_chunks):
-        print(f"Inserting Hour chunk #{index}")
-        db.engine.execute(Hour.__table__.insert(), hour_chunk)
+    db.engine.execute(Hour.__table__.insert(), hours)
     print("Finished inserting hours")
 
 
@@ -263,10 +253,7 @@ def bulk_insert_weather_into_table(db):
         weather_entries.append(weather_entry)
 
     print(f"# of weather dimensional entries {len(weather_entries)}")
-    weather_chunks = list(chunk(weather_entries, 5000))
-    for index, weather_chunk in enumerate(weather_chunks):
-        print(f"Inserting Weather chunk #{index}")
-        db.engine.execute(Weather.__table__.insert(), weather_chunk)
+    db.engine.execute(Weather.__table__.insert(), weather_entries)
     print("Finished processing data into weather dimension")
 
 
@@ -408,7 +395,7 @@ def set_up_collisions_frames(db):
                                               == location]
             location_row = location_row.iloc[0]
             accident_frame = accident_frame.append({'key': accident_key, 'accident_time': row['TIME'], 'environment': row['ENVIRONMENT'],  'road_surface': row["SURFACE_CONDITION"], 'traffic_control': row["TRAFFIC_CONTROL"], 'visibility': row[
-                'LIGHT'], 'impact_type': row['IMPACT_TYPE'], 'is_fatal': True if row['COLLISION_CLASSIFICATION'] == 'Fatal injury' else False,
+                'LIGHT'], 'impact_type': row['IMPACT_TYPE'], 'is_fatal': True if row['COLLISION_CLASSIFICATION'].str.strip() == 'Fatal injury' else False,
                 "hour_id": row["hour_id"], 'loc_id': location_row["key"]}, ignore_index=True)
             accident_key += 1
             continue
@@ -526,16 +513,10 @@ def insert_locations_accidents_table(db):
         accidents.append(accident_entry)
 
     print(f"# of location dimensional entries {len(locations)}")
-    location_chunks = list(chunk(locations, 5000))
-    for index, location_chunk in enumerate(location_chunks):
-        print(f"Inserting Location chunk #{index}")
-        db.engine.execute(Location.__table__.insert(), location_chunk)
+    db.engine.execute(Location.__table__.insert(), locations)
 
     print(f"# of accident dimensional entries {len(accidents)}")
-    accident_chunks = list(chunk(accidents, 5000))
-    for index, accident_chunk in enumerate(accident_chunks):
-        print(f"Inserting Accident chunk #{index}")
-        db.engine.execute(Accident.__table__.insert(), accident_chunk)
+    db.engine.execute(Accident.__table__.insert(), accidents)
 
     print("Finished inserting into location and accident dimension tables")
 
