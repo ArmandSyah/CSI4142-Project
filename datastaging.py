@@ -21,28 +21,31 @@ pd.set_option('display.max_rows', 500)
 
 Weather_Averages = namedtuple("Weather_Averages", "high low")
 
-# within 30 degress
+# within 30 degrees, if a weather in a specific month falls outside this range, we can safely discard this row
 acceptable_weather_ranges = {1: Weather_Averages(24.0, -44.0), 2: Weather_Averages(27.0, -43.0), 3: Weather_Averages(32.0, -37.0), 4: Weather_Averages(41.0, -29.0), 5: Weather_Averages(49.0, -22.0), 6: Weather_Averages(
     54.0, -17.0), 7: Weather_Averages(57.0, -14.0), 8: Weather_Averages(55.0, -16.0), 9: Weather_Averages(50.0, -20.0), 10: Weather_Averages(43.0, -26.0), 11: Weather_Averages(25.0, -32.0), 12: Weather_Averages(28.0, -39.0)}
 
 chunksize = 10 ** 5
-ottawa_lat_long = (45.41117, -75.69812)
-toronto_lat_long = (43.5232, -79.3832)
+ottawa_lat_long = (45.41117, -75.69812)  # latitude and longitude for ottawa
+toronto_lat_long = (43.5232, -79.3832)  # latitude and longitude for toronto
 weather_station_file = os.path.join(input_path, "Station Inventory EN.csv")
 weather_files = [os.path.join(input_path, "ontario_1_1.csv"), os.path.join(input_path, "ontario_1_2.csv"), os.path.join(input_path, "ontario_2_1.csv"),
                  os.path.join(input_path, "ontario_2_2.csv"), os.path.join(input_path, "ontario_3.csv"), os.path.join(input_path, "ontario_4.csv")]
 ottawa_collision_files = [os.path.join(input_path, '2013collisionsfinal.xls.csv'), os.path.join(input_path, '2014collisionsfinal.xls.csv'),
                           os.path.join(input_path, '2015collisionsfinal.xls.csv'), os.path.join(input_path, '2016collisionsfinal.xls.csv'), os.path.join(input_path, '2017collisionsfinal.xls.csv')]
+
+# The typical regular expression patterns for the locations field in ottawa collision sets
 pattern_1 = re.compile(r'.* btwn .* & .*')
 pattern_2 = re.compile(r'.* @ .*')
 pattern_3 = re.compile(r'.*/.*/.*')
-
 pattern_4 = re.compile(r'.* @ .*/.*')
 pattern_5 = re.compile(r'.* btwn .*')
 
+# stages all the data, setting up all the dimensions and fact table in one command
+
 
 def import_data(db):
-    find_all_ottawa_weather_stations(db)
+    find_all_important_weather_stations(db)
     retrieve_priority_weather(db)
     set_up_hour_table_csv(db)
     set_up_hours_on_db(db)
@@ -55,18 +58,21 @@ def import_data(db):
     final_step_fact_table(db)
 
 
+# Implements the hours dimension
 def import_hours(db):
     set_up_hour_table_csv(db)
     set_up_hours_on_db(db)
 
 
+# Finds all important weather station and Implements the weather dimension
 def import_weather(db):
-    find_all_ottawa_weather_stations(db)
+    find_all_important_weather_stations(db)
     retrieve_priority_weather(db)
     clean_weather_data(db)
     bulk_insert_weather_into_table(db)
 
 
+# Cleans and implements location and accident dimension
 def import_collision(db):
     concat_traffic_data(db)
     collision_set_cleaning(db)
@@ -74,16 +80,18 @@ def import_collision(db):
     insert_locations_accidents_table(db)
 
 
+# Sets up the fact table. Perform this step only after the dimensional tables have been created
 def setup_facttable(db):
     final_step_fact_table(db)
 
+# Find all the closest weahter stations for both Ottawa and Toronto (within 75 km) and save them to csv file
 
-def find_all_ottawa_weather_stations(db):
+
+def find_all_important_weather_stations(db):
     print("Finding most important weather stations")
     weather_station_inv = pd.read_csv(
         weather_station_file, skiprows=3, encoding="utf-8")
     ontario_weather_stations = weather_station_inv[weather_station_inv.Province == "ONTARIO"]
-    ontario_weather_stations["distance_to_ottawa"] = -1
     cols = ontario_weather_stations.columns
     cols = cols.map(lambda x: x.replace(' ', '_'))
     ontario_weather_stations.columns = cols
@@ -109,6 +117,7 @@ def find_all_ottawa_weather_stations(db):
     print("Finished finding most important weather stations")
 
 
+# go through all ontario weather files, take the ones with matching weather stations and has the important info not missing, and save those into it's own csv file
 def retrieve_priority_weather(db):
     print("Retrieving weather from priority stations")
     priority_weather_stations_frame = pd.read_csv(
@@ -135,6 +144,7 @@ def retrieve_priority_weather(db):
     print("Finished Retrieving weather from priority stations")
 
 
+# Set up the hour dimension in csv, ready to load into db
 def set_up_hour_table_csv(db):
     print("Beggining seting up hour dimension table")
     df_prio = pd.read_csv(os.path.join(input_path, "ontario_1_1.csv"))
@@ -144,6 +154,7 @@ def set_up_hour_table_csv(db):
     print("Finished seting up hour dimension table")
 
 
+# Load hours csv into db
 def set_up_hours_on_db(db):
     hours = []
     canada_holidays = holidays.Canada()
@@ -173,6 +184,10 @@ def set_up_hours_on_db(db):
     print("Finished inserting hours")
 
 
+# After retrieving priority weather, do further cleaning on the remaining weather rows.
+# Remove any rows where temperature outside normal range for month
+# Attach hour ids to the weather data
+# Save cleaned weather as a csv
 def clean_weather_data(db):
     hour_dim = pd.read_csv(os.path.join(output_path, "hours_dim.csv"))
     li = []
@@ -204,6 +219,7 @@ def clean_weather_data(db):
     print("Finished Cleaning Weather data")
 
 
+# check the validity of the weather row information
 def check_valid(temp, month, humidity, wind_spd, dew_point_temp, wind_dir, visibility):
     valid_temp = temp >= acceptable_weather_ranges[month].low and temp <= acceptable_weather_ranges[month].high
     valid_humidity = math.isnan(humidity) or (
@@ -217,6 +233,7 @@ def check_valid(temp, month, humidity, wind_spd, dew_point_temp, wind_dir, visib
     return valid_temp and valid_humidity and valid_wind_spd and valid_dew_point_temp and valid_wind_dir and valid_visibility
 
 
+# get the hour_id for weather data
 def find_hour_id_weather(year, month, day, hour, hour_dim):
     hour_obj = hour_dim[(hour_dim["Year"] == year) & (hour_dim["Month"] == month) & (
         hour_dim["Day"] == day) & (hour_dim["Time"] == hour)]
@@ -225,6 +242,7 @@ def find_hour_id_weather(year, month, day, hour, hour_dim):
     return hour_obj.iloc[0]["key"]
 
 
+# Load cleaned weather csv into dataframe, and then insert into weather dimension in db
 def bulk_insert_weather_into_table(db):
     weather_data = pd.read_csv(os.path.join(
         output_path, "cleaned_priority_weather.csv"))
@@ -257,6 +275,7 @@ def bulk_insert_weather_into_table(db):
     print("Finished processing data into weather dimension")
 
 
+# Combine the ottawa traffic data into one file for easier processing
 def concat_traffic_data(db):
     li = []
     print("Combining ottawa collision files")
@@ -274,6 +293,7 @@ def concat_traffic_data(db):
     print("Finish Combining ottawa collision files")
 
 
+# Perform cleaning on both the toronto collision dataset and the ottawa collision dataset
 def collision_set_cleaning(db):
     hour_dim = pd.read_csv(os.path.join(output_path, "hours_dim.csv"))
     print("Beggining cleaning of collision data")
@@ -316,6 +336,7 @@ def collision_set_cleaning(db):
     print("Finished cleaning traffic data")
 
 
+# find hour_id for ottawa collision
 def find_hour_id_collision_ottawa(date, hour, hour_dim):
     d = datetime.strptime(date, '%Y-%m-%d')
     hour_obj = hour_dim.loc[(hour_dim["Time"] == f"{str(hour).zfill(2)}:00") & (hour_dim["Month"] == d.month) & (
@@ -325,6 +346,7 @@ def find_hour_id_collision_ottawa(date, hour, hour_dim):
     return hour_obj.iloc[0]["key"]
 
 
+# find hour_id for toronto collision
 def find_hour_id_collision_toronto(date, hour, hour_dim):
     d = dateutil.parser.parse(date)
     hour_obj = hour_dim.loc[(hour_dim["Time"] == f"{str(hour).zfill(2)}:00") & (hour_dim["Month"] == d.month) & (
@@ -334,11 +356,14 @@ def find_hour_id_collision_toronto(date, hour, hour_dim):
     return hour_obj.iloc[0]["key"]
 
 
+# for toronto collision data specifically, pad time out with extra 0's until its length of 4
+# (The time collumn in toronto collision dataset comes in as integer # that represents time (ie. 453), this method changes it to 0453)
 def fill_time(time):
     t = str(time)
     return t.zfill(4)
 
 
+# set up the dataframes for both accidents and locations and save them both as csv
 def set_up_collisions_frames(db):
     ottawa_collision_frame = pd.read_csv(os.path.join(
         output_path, "ottawa_collision_2013_2017.csv"))
@@ -478,6 +503,7 @@ def set_up_collisions_frames(db):
     print("Finished setting up dataframes for Location and Accident")
 
 
+# insert previously saved csvs for accidnents and locations into respective dimensional tables in db
 def insert_locations_accidents_table(db):
     print("Beggining inserting into location and accident dimension tables")
     location_frame = pd.read_csv(os.path.join(
@@ -521,6 +547,7 @@ def insert_locations_accidents_table(db):
     print("Finished inserting into location and accident dimension tables")
 
 
+# Load in all csv used to build out dimensional tables to build out the final fact table
 def final_step_fact_table(db):
     accident_facts = []
     stations_frame = pd.read_csv(os.path.join(
